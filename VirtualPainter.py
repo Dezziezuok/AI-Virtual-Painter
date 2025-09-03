@@ -5,9 +5,11 @@ import os
 import HandTrackingModule as htm
 
 ########################
+
 brushThickness = 20
 eraserThickness = 75
-drawColor = (0, 0, 175)  # Default brush color → RED
+brushStyle = "normal"    # "normal" or "pixel"
+
 ########################
 
 # Load Header Images
@@ -22,7 +24,7 @@ for imPath in myList:
 print("Total Headers:", len(overlayList))
 
 header = overlayList[0]
-drawColor = (255, 0, 255)
+drawColor = (0, 0, 175)
 
 # Webcam
 cap = cv2.VideoCapture(0)  # use 0 for default webcam
@@ -51,6 +53,30 @@ while True:
 
         # 3. Check which fingers are up
         fingers = detector.fingersUp()
+
+        # --- Thumbs up → SAVE ARTWORK ---
+        if fingers[0] == 1 and fingers[1] == 0 and fingers[2] == 0 and fingers[3] == 0 and fingers[4] == 0:
+            savePath = "SavedDrawings"
+            os.makedirs(savePath, exist_ok=True)
+
+            filename = os.path.join(savePath, f"Drawing_{int(time.time())}.png")
+            cv2.imwrite(filename, imgCanvas)
+
+            cv2.putText(img, f"Saved: {filename}", (400, 700),
+                        cv2.FONT_HERSHEY_TRIPLEX, 1, (0, 255, 0), 3)
+
+        # --- Peace sign → Pixel Brush ---
+        elif fingers[1] == 1 and fingers[2] == 1 and fingers[0] == 0 and fingers[3] == 0 and fingers[4] == 0:
+            brushStyle = "pixel"
+            cv2.putText(img, "Pixel Brush Mode", (50, 650),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 3)
+
+        # --- Fist → Normal Brush ---
+        elif all(f == 0 for f in fingers):
+            brushStyle = "normal"
+            cv2.putText(img, "Normal Brush Mode", (50, 650),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+
         # 4. Selection Mode: Two fingers up
         if fingers[1] and fingers[2]:
             xp, yp = 0, 0
@@ -95,20 +121,21 @@ while True:
             if xp == 0 and yp == 0:
                 xp, yp = x1, y1
 
-            if drawColor == (0, 0, 0):
-                cv2.line(img, (xp, yp), (x1, y1), drawColor, eraserThickness)
-                cv2.line(imgCanvas, (xp, yp), (x1, y1),
-                         drawColor, eraserThickness)
-            else:
-                cv2.line(img, (xp, yp), (x1, y1), drawColor, brushThickness)
-                cv2.line(imgCanvas, (xp, yp), (x1, y1),
-                         drawColor, brushThickness)
+            if brushStyle == "normal":
+                if drawColor == (0, 0, 0):  # Eraser
+                    cv2.line(img, (xp, yp), (x1, y1), drawColor, eraserThickness)
+                    cv2.line(imgCanvas, (xp, yp), (x1, y1), drawColor, eraserThickness)
+                else:  # Normal brush
+                    cv2.line(img, (xp, yp), (x1, y1), drawColor, brushThickness)
+                    cv2.line(imgCanvas, (xp, yp), (x1, y1), drawColor, brushThickness)
+
+            elif brushStyle == "pixel":
+                if drawColor != (0, 0, 0):  # No pixel eraser
+                    cv2.rectangle(img, (x1, y1), (x1 + 20, y1 + 20), drawColor, cv2.FILLED)
+                    cv2.rectangle(imgCanvas, (x1, y1), (x1 + 20, y1 + 20), drawColor, cv2.FILLED)
 
             xp, yp = x1, y1
 
-        # Clear Canvas when ALL 5 fingers are up
-        if all(x >= 1 for x in fingers):
-            imgCanvas = np.zeros((720, 1280, 3), np.uint8)
 
     # 6. Merge Canvas and Webcam feed
     imgGray = cv2.cvtColor(imgCanvas, cv2.COLOR_BGR2GRAY)
@@ -124,7 +151,44 @@ while True:
     # Display
     cv2.imshow("Image", img)
 
-    # Quit with 'q'
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+    # --- After merging canvas and webcam feed ---
+    img[0:233, 0:1280] = header
+
+    # Apply Style Transfer with keys
+    key = cv2.waitKey(1) & 0xFF
+
+    if key == ord('a'):  # Cartoon effect
+        # Edge detection
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        gray = cv2.medianBlur(gray, 7)
+        edges = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
+            cv2.THRESH_BINARY, 9, 9
+        )
+        # Smooth but preserve edges
+        color = cv2.bilateralFilter(img, 9, 250, 250)
+        # --- Vibrance boost ---
+        hsv = cv2.cvtColor(color, cv2.COLOR_BGR2HSV)
+        h, s, v = cv2.split(hsv)
+        s = cv2.add(s, 40)  # increase saturation (+40)
+        hsv = cv2.merge([h, s, v])
+        vibrant = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+
+        # Combine edges with vibrant color
+        cartoon = cv2.bitwise_and(vibrant, vibrant, mask=edges)
+
+        cv2.imshow("Styled", cartoon)
+
+        savePath = "SavedDrawings"
+        os.makedirs(savePath, exist_ok=True)
+        filename = os.path.join(savePath, f"Drawing_Cartoon_{int(time.time())}.png")
+        cv2.imwrite(filename, cartoon)
+
+
+    elif key == ord('c'):  # Detail enhancement
+        detail = cv2.detailEnhance(img, sigma_s=10, sigma_r=0.15)
+        cv2.imshow("Styled", detail)
+        cv2.imwrite("SavedDrawings/Drawing_Detail.png", detail)
+
+    elif key == ord('q'):  # Quit
         break
-    cv2.waitKey(1)
